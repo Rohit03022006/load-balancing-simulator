@@ -1,0 +1,65 @@
+services:
+  # Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: lb-simulator-db
+    restart: always
+    environment:
+      POSTGRES_DB: loadbalancer_simulator
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lb-simulator-backend
+    restart: always
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=loadbalancer_simulator
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - lb-net
+
+  # Frontend Web Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:3000/api/v1
+    container_name: lb-simulator-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - lb-net
+
+networks:
+  lb-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
