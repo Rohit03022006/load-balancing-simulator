@@ -1,0 +1,229 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        ansiColor('xterm')
+    }
+
+    environment {
+        REGISTRY = 'rohitxten'
+        BACKEND_IMAGE  = "${REGISTRY}/load-balancing-simulator:${BUILD_NUMBER}"
+        FRONTEND_IMAGE = "${REGISTRY}/load-balancing-simulator-frontend:${BUILD_NUMBER}"
+        SONAR_SCANNER_HOME = tool 'Sonar'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/Rohit03022006/load-balancing-simulator.git'
+            }
+        }
+
+        stage('Static Analysis') {
+            parallel {
+
+                stage('SonarQube') {
+                    steps {
+                        withSonarQubeEnv('Sonar') {
+                            sh """
+                            ${SONAR_SCANNER_HOME}/bin/sonar-scanner \
+                              -Dsonar.projectName=LoadBalancingSimulator \
+                              -Dsonar.projectKey=load_balancing_simulator \
+                              -Dsonar.sources=.
+                            """
+                        }
+                    }
+                }
+
+                stage('Dependency Check') {
+                    steps {
+                        dependencyCheck additionalArguments: '--scan ./ --format XML',
+                                        odcInstallation: 'Dependency check'
+                    }
+                }
+
+                stage('Trivy FS Scan') {
+                    steps {
+                        sh '''
+                        trivy fs --exit-code 1 \
+                          --severity HIGH,CRITICAL .
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build Images') {
+            steps {
+                sh '''
+                docker build -t $BACKEND_IMAGE ./backend
+                docker build \
+                  --build-arg VITE_API_URL=http://localhost:3000/api/v1 \
+                  -t $FRONTEND_IMAGE ./frontend
+                '''
+            }
+        }
+
+        stage('Image Scan') {
+            steps {
+                sh '''
+                trivy image --exit-code 1 \
+                  --severity HIGH,CRITICAL $BACKEND_IMAGE
+
+                trivy image --exit-code 1 \
+                  --severity HIGH,CRITICAL $FRONTEND_IMAGE
+                '''
+            }
+        }
+
+        stage('Push Images') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'DockerHubCredential',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    retry(2) {
+                        sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+
+                        docker push $BACKEND_IMAGE
+                        docker push $FRONTEND_IMAGE
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                # Update image tags in K8s manifests
+                sed -i "s|rohitxten/load-balancing-simulator-backend:latest|$BACKEND_IMAGE|g" K8S/6-backend-deployment.yaml
+                sed -i "s|rohitxten/load-balancing-simulator-frontend:latest|$FRONTEND_IMAGE|g" K8S/8-frontend-deployment.yaml
+
+                # Apply K8s manifests in order
+                kubectl apply -f K8S/0-namespace.yaml
+                kubectl apply -f K8S/1-postgresql-secret.yaml
+                kubectl apply -f K8S/2-postgresql-configmap.yaml
+                kubectl apply -f K8S/3-postgresql-pvc.yaml
+                kubectl apply -f K8S/4-postgresql-deployment.yaml
+                kubectl apply -f K8S/5-postgresql-service.yaml
+                kubectl apply -f K8S/6-backend-deployment.yaml
+                kubectl apply -f K8S/7-backend-service.yaml
+                kubectl apply -f K8S/8-frontend-deployment.yaml
+                kubectl apply -f K8S/9-frontend-service.yaml
+                kubectl apply -f K8S/10-hpa-backend.yml
+                kubectl apply -f K8S/11-hpa-frontend.yml
+                '''
+            }
+        }
+            steps {
+                sh '''
+                docker network create load-balancing-network || true
+
+                docker rm -f load-balancing-backend || true
+                docker run -d \
+                  --name load-balancing-backend \
+                  --network load-balancing-network \
+                  -e NODE_ENV="production" \
+                  -e PORT=3000 \
+                  -e DB_HOST="${DB_HOST:-localhost}" \
+                  -e DB_PORT="${DB_PORT:-5432}" \
+                  -e DB_NAME="${DB_NAME:-loadbalancer_simulator}" \
+                  -e DB_USER="${DB_USER:-postgres}" \
+                  -e DB_PASSWORD="${DB_PASSWORD:-postgres}" \
+                  -p 3000:3000 \
+                  $BACKEND_IMAGE
+
+                sleep 10
+
+                docker rm -f load-balancing-frontend || true
+                docker run -d \
+                  --name load-balancing-frontend \
+                  --network load-balancing-network \
+                  -p 80:80 \
+                  $FRONTEND_IMAGE
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+            emailext(
+                subject: "✅ SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body:"""
+                        Build succeeded 🎉
+
+                        Job: ${env.JOB_NAME}
+                        Build: #${env.BUILD_NUMBER}
+                        URL: ${env.BUILD_URL}
+
+                        Images:
+                        - Backend: ${env.BACKEND_IMAGE}
+                        - Frontend: ${env.FRONTEND_IMAGE}
+                    """,
+                to: "kumarrohit67476@gmail.com",
+                attachLog: false
+            )
+        }
+
+        failure {
+            emailext(
+                subject: "❌ FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                        Build failed ❌
+
+                        Job: ${env.JOB_NAME}
+                        Build: #${env.BUILD_NUMBER}
+                        URL: ${env.BUILD_URL}
+
+                        Check logs immediately.
+
+                        Possible failure points:
+                        - Sonar Quality Gate
+                        - Trivy vulnerability scan
+                        - Docker build/push
+                    """,
+                to: "kumarrohit67476@gmail.com",
+                attachLog: true,
+                attachmentsPattern: '**/*.xml'
+            )
+        }
+
+        unstable {
+            emailext(
+                subject: "⚠️ UNSTABLE: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                        Build is unstable ⚠️
+
+                        Check reports (tests / vulnerabilities).
+                        Job: ${env.JOB_NAME}
+                        Build: #${env.BUILD_NUMBER}
+                        URL: ${env.BUILD_URL}
+                    """,
+                to: "kumarrohit67476@gmail.com"
+            )
+        }
+
+        always {
+            archiveArtifacts artifacts: '**/*.xml', allowEmptyArchive: true
+            sh 'docker logout || true'
+        }
+    }
+}

@@ -20,23 +20,26 @@ spec:
         - name: backend
           image: rohitxten/load-balancing-simulator-backend:latest
           ports:
-            - containerPort: 8082
+            - containerPort: 3000
 
           env:
-            - name: SPRING_DATASOURCE_URL
-              value: jdbc:postgresql://postgres-service:5432/techs
-
-            - name: SPRING_DATASOURCE_USERNAME
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+            - name: DB_HOST
+              value: "postgres-service"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "loadbalancer_simulator"
+            - name: DB_USER
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
                   key: POSTGRES_USER
-
-            - name: SPRING_DATASOURCE_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
                   key: POSTGRES_PASSWORD
-
-            - name: SPRING_PROFILES_ACTIVE
-              value: prod
