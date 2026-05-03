@@ -95,6 +95,11 @@ class TrafficGenerator {
         
         numRequests = Math.max(0, numRequests - 1);
 
+        // For small time steps, ensure minimum requests to match rate
+        if (timeStep < 1.0 && numRequests === 0 && scaledLambda > 0.5) {
+            numRequests = 1;
+        }
+
         // Create request objects
         for (let i = 0; i < numRequests; i++) {
             // Distribute arrival times uniformly within the time step

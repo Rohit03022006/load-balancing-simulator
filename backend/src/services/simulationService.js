@@ -69,6 +69,19 @@ class SimulationService {
             const engine = new SimulationEngine(simulation.config);
             const result = await engine.run();
             
+            // Check if simulation was cancelled
+            if (!this.runningSimulations.has(simulationId)) {
+                logger.warn(`Simulation ${simulationId} was cancelled during execution`);
+                return { cancelled: true };
+            }
+            
+            // Check if simulation still exists (might have been deleted)
+            const currentSimulation = await Simulation.findById(simulationId);
+            if (!currentSimulation) {
+                logger.warn(`Simulation ${simulationId} was deleted during execution`);
+                return { cancelled: true };
+            }
+            
             // Save core metrics — must succeed for the simulation to complete
             await SimulationResult.create(simulationId, result.metrics, result.metrics.timeSeriesData);
             
@@ -81,6 +94,10 @@ class SimulationService {
             
             // Get the saved result
             const savedResult = await SimulationResult.findBySimulationId(simulationId);
+            
+            if (!savedResult) {
+                throw new Error(`Failed to retrieve saved simulation result for ${simulationId}`);
+            }
             
             logger.info(`Simulation ${simulationId} completed successfully`);
             
@@ -95,8 +112,11 @@ class SimulationService {
         } catch (error) {
             logger.error(`Simulation ${simulationId} failed:`, error);
             
-            // Update simulation status to failed
-            await simulation.updateStatus(SIMULATION_STATUS.FAILED, error.message);
+            // Check if simulation still exists before updating status
+            const currentSimulation = await Simulation.findById(simulationId);
+            if (currentSimulation) {
+                await simulation.updateStatus(SIMULATION_STATUS.FAILED, error.message);
+            }
             
             throw error;
         } finally {
@@ -199,8 +219,9 @@ class SimulationService {
     }
 
     async deleteSimulation(simulationId) {
-        // 1. Cancel if running
-        if (this.runningSimulations.has(simulationId)) {
+        // 1. Check if running and cancel
+        const wasRunning = this.runningSimulations.has(simulationId);
+        if (wasRunning) {
             this.runningSimulations.delete(simulationId);
         }
 
@@ -210,7 +231,7 @@ class SimulationService {
         // 3. Delete simulation record
         const deleted = await Simulation.delete(simulationId);
 
-        return { success: deleted };
+        return { success: deleted, cancelled: deleted };
     }
 }
 

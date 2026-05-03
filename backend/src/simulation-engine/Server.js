@@ -33,7 +33,7 @@ class Server {
     }
 
     process(timeStep) {
-        const processingCapacity = this.processingRate * timeStep;
+        const processingCapacity = timeStep; // seconds available to process
         let processedTime = 0;
         const completedRequests = [];
         const startQueueLength = this.queue.length;
@@ -71,7 +71,7 @@ class Server {
         }
 
         // Update server metrics
-        const utilization = processedTime / timeStep;
+        const utilization = (processedTime / timeStep) * 100;
         this.busyTime += processedTime;
         
         this.metrics.utilizationHistory.push({

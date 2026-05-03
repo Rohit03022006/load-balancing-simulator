@@ -56,7 +56,8 @@ class MetricsCollector {
                 queueLength: server.getQueueLength(),
                 utilization: server.getUtilization(),
                 activeConnections: server.getActiveConnections(),
-                totalProcessed: server.totalProcessed
+                totalProcessed: server.totalProcessed,
+                avgResponseTime: server.getAverageResponseTime()
             }))
         };
         

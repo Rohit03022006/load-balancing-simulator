@@ -22,6 +22,14 @@ const errorHandler = (err, req, res, next) => {
     ip: req.ip,
   });
 
+  // JSON parsing errors
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid JSON payload",
+    });
+  }
+
   // PostgreSQL errors
   if (err.code) {
     switch (err.code) {

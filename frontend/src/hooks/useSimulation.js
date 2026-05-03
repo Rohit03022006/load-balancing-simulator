@@ -66,7 +66,7 @@ export const useSimulation = () => {
       }
       
       const result = await pollForResults()
-      return result
+      return result.simulation.id
       
     } catch (error) {
       setError(error.message)
