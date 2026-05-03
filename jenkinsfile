@@ -64,6 +64,28 @@ pipeline {
             }
         }
 
+        stage('Run Backend Tests') {
+            steps {
+                dir('backend') {
+                    sh '''
+                    npm ci
+                    npm test -- --runInBand
+                    '''
+                }
+            }
+        }
+
+        stage('Run Frontend Tests') {
+            steps {
+                dir('frontend') {
+                    sh '''
+                    npm ci
+                    npm test
+                    '''
+                }
+            }
+        }
+
         stage('Build Images') {
             steps {
                 sh '''
@@ -128,35 +150,6 @@ pipeline {
                 kubectl apply -f K8S/9-frontend-service.yaml
                 kubectl apply -f K8S/10-hpa-backend.yml
                 kubectl apply -f K8S/11-hpa-frontend.yml
-                '''
-            }
-        }
-            steps {
-                sh '''
-                docker network create load-balancing-network || true
-
-                docker rm -f load-balancing-backend || true
-                docker run -d \
-                  --name load-balancing-backend \
-                  --network load-balancing-network \
-                  -e NODE_ENV="production" \
-                  -e PORT=3000 \
-                  -e DB_HOST="${DB_HOST:-localhost}" \
-                  -e DB_PORT="${DB_PORT:-5432}" \
-                  -e DB_NAME="${DB_NAME:-loadbalancer_simulator}" \
-                  -e DB_USER="${DB_USER:-postgres}" \
-                  -e DB_PASSWORD="${DB_PASSWORD:-postgres}" \
-                  -p 3000:3000 \
-                  $BACKEND_IMAGE
-
-                sleep 10
-
-                docker rm -f load-balancing-frontend || true
-                docker run -d \
-                  --name load-balancing-frontend \
-                  --network load-balancing-network \
-                  -p 80:80 \
-                  $FRONTEND_IMAGE
                 '''
             }
         }
