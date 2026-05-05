@@ -20,6 +20,7 @@ services:
 
   # Backend API Service
   backend:
+    image: rohitxten/load-balancing-simulator-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -43,6 +44,7 @@ services:
 
   # Frontend Web Service
   frontend:
+    image: rohitxten/load-balancing-simulator-frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile
