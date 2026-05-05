@@ -90,6 +90,8 @@ The system is partitioned into three distinct layers to ensure separation of con
 #### Kubernetes Deployment
 ![Kubernetes](screenshot/K8S.png)
 
+### SonarQube Code Quality Analysis
+![SonarQube](screenshot/SonarQube.png)
 #### Jenkins CI/CD
 ![Jenkins](screenshot/Jenkins.png)
 
