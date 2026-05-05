@@ -94,11 +94,13 @@ The system is partitioned into three distinct layers to ensure separation of con
 ![Jenkins](screenshot/Jenkins.png)
 
 #### Node Exporter
-![Node Exporter](screenshot/Node_exporter.png)
+![Node Exporter](screenshot/Node%20Exporter.png)
 
 #### Metrics Visualization using Node Exporter
 ![Metrics](screenshot/matrics.png)
 
+### cAdvice Metrics
+![cAdvice Metrics](screenshot/cAdvisor.png)
 #### Prometheus Monitoring
 ![Prometheus](screenshot/Prometheus.png)
 
@@ -170,6 +172,112 @@ docker compose up --build -d
 - **Frontend**: [http://localhost](http://localhost)
 - **Backend API**: [http://localhost:3000](http://localhost:3000)
 - **Database**: PostgreSQL on port `5432`
+
+## Jenkins CI/CD Pipeline
+
+The project includes a complete Jenkins pipeline for automated testing, building, scanning, and deployment. The pipeline performs the following stages:
+
+### Manual Equivalent Commands
+
+If running outside Jenkins, here are the equivalent commands for each pipeline stage:
+
+**1. Install Dependencies:**
+```bash
+# Backend
+cd backend
+docker run --rm -v $PWD:/app -w /app node:18-alpine npm ci
+
+# Frontend
+cd ../frontend
+docker run --rm -v $PWD:/app -w /app node:18-alpine npm ci
+```
+
+**2. Code Quality Analysis:**
+```bash
+# SonarQube Scan
+sonar-scanner \
+  -Dsonar.projectName=LoadBalancingSimulator \
+  -Dsonar.projectKey=load_balancing_simulator \
+  -Dsonar.sources=backend,frontend \
+  -Dsonar.exclusions=**/node_modules/**,**/dist/**
+
+# Security Vulnerability Scan (Trivy)
+trivy fs --scanners vuln --exit-code 0 --severity HIGH,CRITICAL .
+```
+
+**3. Build Docker Images:**
+```bash
+docker build -t rohitxten/load-balancing-simulator-backend:latest ./backend
+docker build \
+  --build-arg VITE_API_URL=http://localhost:3000/api/v1 \
+  -t rohitxten/load-balancing-simulator-frontend:latest ./frontend
+```
+
+**4. Scan Images for Vulnerabilities:**
+```bash
+# Scan for CRITICAL vulnerabilities only
+trivy image --scanners vuln --exit-code 1 --severity CRITICAL rohitxten/load-balancing-simulator-backend:latest
+trivy image --scanners vuln --exit-code 1 --severity CRITICAL rohitxten/load-balancing-simulator-frontend:latest
+```
+
+**5. Push to Docker Registry:**
+```bash
+docker login
+docker push rohitxten/load-balancing-simulator-backend:latest
+docker push rohitxten/load-balancing-simulator-frontend:latest
+```
+
+**6. Deploy to Kubernetes:**
+```bash
+# Apply all Kubernetes manifests
+kubectl apply -f K8S/
+
+# Check deployment status
+kubectl get pods -n load-balancing-simulator-ns -w
+
+# Port forwarding
+kubectl port-forward svc/frontend-service 80:80 -n load-balancing-simulator-ns --address 0.0.0.0
+kubectl port-forward svc/backend-service 3000:3000 -n load-balancing-simulator-ns --address 0.0.0.0
+```
+
+## AWS Security Group Configuration
+
+When deploying on AWS EC2, configure your security group to open the following ports:
+
+| Port | Service | Protocol | Purpose |
+| :--- | :--- | :--- | :--- |
+| **80** | HTTP | TCP | Frontend Web Interface |
+| **443** | HTTPS | TCP | Frontend Web Interface (Secure) |
+| **3000** | Grafana | TCP | Monitoring Dashboard |
+| **3001** | Backend API | TCP | Backend API Server |
+| **5432** | PostgreSQL | TCP | Database (VPC only - not public) |
+| **9090** | Prometheus | TCP | Metrics & Monitoring |
+| **8080** | Jenkins | TCP | Jenkins Web Interface |
+| **22** | SSH | TCP | Server Access |
+
+### AWS CLI Commands to Create Security Group:
+
+```bash
+# Create security group
+aws ec2 create-security-group \
+  --group-name load-balancing-simulator \
+  --description "Load Balancing Simulator Security Group" \
+  --vpc-id vpc-xxxxx
+
+# Store the group ID (replace sg-xxxxx below)
+SG_ID="sg-xxxxx"
+
+# Add ingress rules
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 3000 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 3001 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 9090 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 22 --cidr 0.0.0.0/0
+
+# PostgreSQL (restrict to VPC CIDR only)
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 5432 --cidr 10.0.0.0/8
+```
 
 ##  Load Balancing Algorithms
 
